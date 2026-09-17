@@ -1,0 +1,55 @@
+name: V9 Formal Backtest
+
+on:
+  push:
+    branches:
+      - chatgpt-v9-formal-backtest-20260917
+    paths:
+      - 'v9_backtest/**'
+      - '.github/workflows/v9-formal-backtest.yml'
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install numpy pandas pytest
+      - name: Prepare reproducible market data
+        working-directory: v9_backtest
+        run: python prepare_data.py
+      - name: Run frozen V9 formal backtest
+        working-directory: v9_backtest
+        run: python run_formal_backtest.py --data-dir data --start 2000-01-03 --end 2025-12-31 --out-dir results
+      - name: Validate formal outputs
+        working-directory: v9_backtest
+        run: |
+          python - <<'PY'
+          import pandas as pd, json
+          s=pd.read_csv('results/summary.csv')
+          assert set(['QQQ','QQQ_SPY_50_50','v9_nolev','v9_134','v9_tqqq_same134','v9_final145']).issubset(set(s.variant))
+          assert set(s.transaction_cost.round(4))=={0.0005,0.001,0.002}
+          w=pd.read_csv('results/weights_v9_final145.csv',index_col=0)
+          assert (w.sum(axis=1).sub(1).abs()<1e-8).all()
+          eff=w.QQQ+w.SPY+2*w.QLD+2*w.SSO+3*w.TQQQ
+          assert eff.max()<=1.4500001
+          assert w.TQQQ.max()<=0.1000001
+          print('\n=== 10bp summary ===')
+          print(s[s.transaction_cost==0.001].to_string(index=False))
+          print('\n=== crisis stats ===')
+          print(open('results/crisis_stats.json').read())
+          print('\n=== rolling ===')
+          print(open('results/rolling.json').read())
+          PY
+      - name: Upload formal results
+        uses: actions/upload-artifact@v4
+        with:
+          name: v9-formal-backtest-results
+          path: v9_backtest/results/
+          if-no-files-found: error
+          retention-days: 14
