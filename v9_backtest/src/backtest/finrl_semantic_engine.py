@@ -15,7 +15,11 @@ def align_weights(prices: pd.DataFrame, signals: pd.DataFrame) -> pd.DataFrame:
     px = prices.sort_index()
     sig = signals.sort_index().copy()
     common = [c for c in sig.columns if c in px.columns]
-    w = sig[common].reindex(px.index).ffill().fillna(0.0)
+    # Preserve the most recent target issued before the backtest start date.
+    # Reindexing signals directly to px.index would drop that pre-start target and
+    # incorrectly leave buy-and-hold (and any warm-start strategy) at zero weight.
+    idx = px.index.union(sig.index).sort_values()
+    w = sig[common].reindex(idx).ffill().reindex(px.index).fillna(0.0)
     sums = w.sum(axis=1)
     nz = sums > 0
     w.loc[nz] = w.loc[nz].div(sums[nz], axis=0)
